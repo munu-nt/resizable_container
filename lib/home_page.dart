@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:resizable_container/providers/navigation_provider.dart';
 import 'package:resizable_container/providers/tile_provider.dart';
 
+import 'package:resizable_container/providers/grid_state_provider.dart';
 import 'providers/theme_provider.dart';
 import 'utils/responsive_utils.dart';
 
@@ -14,17 +15,25 @@ class MyApp extends StatelessWidget {
   const MyApp({super.key});
   @override
   Widget build(BuildContext context) {
-    return Consumer<ThemeProvider>(
-      builder: (context, themeProvider, child) {
-        return MaterialApp(
-          title: 'Resizable Tiles',
-          debugShowCheckedModeBanner: false,
-          theme: themeProvider.lightTheme,
-          darkTheme: themeProvider.darkTheme,
-          themeMode: themeProvider.themeMode,
-          home: const HomeScreen(),
-        );
-      },
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => TileProvider()),
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider(create: (_) => GridStateProvider()),
+        ChangeNotifierProvider(create: (_) => NavigationProvider()),
+      ],
+      child: Consumer<ThemeProvider>(
+        builder: (context, themeProvider, child) {
+          return MaterialApp(
+            title: 'Resizable Tiles',
+            debugShowCheckedModeBanner: false,
+            theme: themeProvider.lightTheme,
+            darkTheme: themeProvider.darkTheme,
+            themeMode: themeProvider.themeMode,
+            home: const HomeScreen(),
+          );
+        },
+      ),
     );
   }
 }
