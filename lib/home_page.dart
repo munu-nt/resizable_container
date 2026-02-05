@@ -98,6 +98,9 @@ class _HomeScreenState extends State<HomeScreen> {
             statusBarIconBrightness: Brightness.dark, // Android: dark icons
             systemNavigationBarIconBrightness: Brightness.dark,
           );
+    
+    // Force set the overlay style imperatively
+    SystemChrome.setSystemUIOverlayStyle(overlayStyle);
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: overlayStyle,
