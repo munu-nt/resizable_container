@@ -35,6 +35,7 @@ class ResizableTile extends StatefulWidget {
   final Animation<double>? shakeAnimation;
   final VoidCallback? onLongPress;
   final VoidCallback? onTap;
+  final VoidCallback? onDoubleTap;
   const ResizableTile({
     super.key,
     required this.id,
@@ -61,6 +62,7 @@ class ResizableTile extends StatefulWidget {
     this.shakeAnimation,
     this.onLongPress,
     this.onTap,
+    this.onDoubleTap,
   });
   final double? width;
   final double? height;
@@ -109,6 +111,8 @@ class _ResizableTileState extends State<ResizableTile> {
     final isActive = widget.isDragging || widget.isResizing;
     Widget body = AnimatedContainer(
       duration: const Duration(milliseconds: 150),
+      transform: Matrix4.identity()..scale(isActive ? 1.05 : 1.0),
+      transformAlignment: Alignment.center,
       width: width,
       height: height,
       decoration: BoxDecoration(
@@ -175,6 +179,7 @@ class _ResizableTileState extends State<ResizableTile> {
       return GestureDetector(
         onLongPress: widget.onLongPress,
         onTap: widget.onTap,
+        onDoubleTap: widget.onDoubleTap,
         child: body,
       );
     }

@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../models/tile_data.dart';
 import '../providers/tile_provider.dart';
@@ -65,6 +66,7 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
   }
 
   void _enterEditMode() {
+    HapticFeedback.heavyImpact();
     context.read<GridStateProvider>().enterEditMode();
     _shakeController.repeat(reverse: true);
   }
@@ -145,6 +147,7 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
     if (!gridState.isEditMode) return;
     setState(() {
       if (gridState.draggingTileId != tile.id) {
+        HapticFeedback.selectionClick();
         gridState.startDrag(tile.id);
       }
       _dragOffset += delta;
@@ -184,6 +187,7 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
     double cellHeight,
     int totalRows,
   ) {
+    final gridState = context.watch<GridStateProvider>();
     return Positioned.fill(
       child: CustomPaint(
         painter: _TileBackgroundPainter(
@@ -191,6 +195,7 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
           rows: totalRows,
           cellWidth: cellWidth,
           cellHeight: cellHeight,
+          isEditMode: gridState.isEditMode,
         ),
       ),
     );
@@ -220,8 +225,8 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
                 gridState.previewHeight,
                 gridState.draggingTileId ?? gridState.resizingTileId,
               )
-              ? Colors.white.withValues(alpha: 0.15)
-              : Colors.red.withValues(alpha: 0.2),
+              ? Colors.white.withOpacity(0.15)
+              : Colors.red.withOpacity(0.2),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color:
@@ -232,8 +237,8 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
                   gridState.previewHeight,
                   gridState.draggingTileId ?? gridState.resizingTileId,
                 )
-                ? Colors.white.withValues(alpha: 0.4)
-                : Colors.red.withValues(alpha: 0.5),
+                ? Colors.white.withOpacity(0.4)
+                : Colors.red.withOpacity(0.5),
             width: 2,
             strokeAlign: BorderSide.strokeAlignInside,
           ),
@@ -319,9 +324,83 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
               widget.onTileTap!(tile);
             }
           },
+          onDoubleTap: () => _handleDoubleTap(tile),
         ),
       );
     }).toList();
+  }
+
+  void _handleDoubleTap(TileData tile) {
+    if (!context.read<GridStateProvider>().isEditMode) return;
+    
+    HapticFeedback.mediumImpact();
+    
+    int newWidth = tile.gridWidth;
+    int newHeight = tile.gridHeight;
+
+    // Cycle: 1x1 -> 2x1 -> 2x2 -> 1x1
+    if (tile.gridWidth == 1 && tile.gridHeight == 1) {
+      newWidth = 2;
+      newHeight = 1;
+    } else if (tile.gridWidth == 2 && tile.gridHeight == 1) {
+      newWidth = 2;
+      newHeight = 2;
+    } else {
+      newWidth = 1;
+      newHeight = 1;
+    }
+
+    // Clamp to grid columns
+    if (tile.gridX + newWidth > _currentColumns) {
+       // If it doesn't fit horizontally due to edge, try to find a valid size or reset
+       if (newWidth > 1) {
+          // If 2x1 or 2x2 doesn't fit, go back to 1x1
+          newWidth = 1;
+          newHeight = 1;
+       }
+    }
+    
+    // Attempt to reflow/place
+    _commitResize(tile, newWidth, newHeight);
+  }
+
+  void _commitResize(TileData tile, int newWidth, int newHeight) {
+    final tileProvider = context.read<TileProvider>();
+    final tiles = tileProvider.displayedTiles;
+    
+    // Simple check if we can place it directly or if we need to reflow
+    // reusing the logic from _handleResize but simplified for immediate commit
+    
+    // We try to find a spot or push others
+    var resolvedPositions = _reflowAround(
+       tile.id,
+       tile.gridX,
+       tile.gridY,
+       newWidth,
+       newHeight,
+    );
+     
+    if (resolvedPositions != null) {
+      List<TileData> updatedTiles = tiles.map((t) {
+        if (t.id == tile.id) {
+          return t.copyWith(
+            gridWidth: newWidth,
+            gridHeight: newHeight,
+          );
+        }
+        if (resolvedPositions.containsKey(t.id)) {
+          var p = resolvedPositions[t.id]!;
+          return t.copyWith(gridX: p.x, gridY: p.y);
+        }
+        return t;
+      }).toList();
+      
+      updatedTiles = _compactLayout(updatedTiles);
+      tileProvider.updateTiles(updatedTiles);
+    } else {
+        // If it fails to resize (e.g. no space), maybe shake or error feedback?
+        HapticFeedback.vibrate();
+    }
   }
 
   void _handleDragEnd(TileData tile, double cellWidth, double cellHeight) {
@@ -353,6 +432,7 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
   }
 
   void _commitDrag(TileData tile) {
+    HapticFeedback.mediumImpact();
     final tileProvider = context.read<TileProvider>();
     final gridState = context.read<GridStateProvider>();
     final tiles = tileProvider.displayedTiles;
@@ -471,6 +551,7 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
     if (!gridState.isEditMode) return;
     setState(() {
       if (gridState.resizingTileId != tile.id) {
+        HapticFeedback.selectionClick();
         gridState.startResize(tile.id);
       }
       _resizeOffset += delta;
@@ -506,6 +587,7 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
   }
 
   void _handleResizeEnd(TileData tile) {
+    HapticFeedback.mediumImpact();
     final tileProvider = context.read<TileProvider>();
     final gridState = context.read<GridStateProvider>();
     final tiles = tileProvider.displayedTiles;
@@ -623,19 +705,41 @@ class _TileBackgroundPainter extends CustomPainter {
   final int rows;
   final double cellWidth;
   final double cellHeight;
+  final bool isEditMode;
+
   _TileBackgroundPainter({
     required this.columns,
     required this.rows,
     required this.cellWidth,
     required this.cellHeight,
+    required this.isEditMode,
   });
+
   @override
-  void paint(Canvas canvas, Size size) {}
+  void paint(Canvas canvas, Size size) {
+    if (!isEditMode) return;
+
+    final paint = Paint()
+      ..color = Colors.grey.withOpacity(0.3)
+      ..style = PaintingStyle.fill;
+
+    const double dotSize = 4.0;
+
+    for (int i = 0; i <= columns; i++) {
+        for (int j = 0; j <= rows; j++) {
+            final double x = i * cellWidth;
+            final double y = j * cellHeight;
+            canvas.drawCircle(Offset(x, y), dotSize / 2, paint);
+        }
+    }
+  }
+
   @override
   bool shouldRepaint(covariant _TileBackgroundPainter oldDelegate) {
     return oldDelegate.columns != columns ||
         oldDelegate.rows != rows ||
         oldDelegate.cellWidth != cellWidth ||
-        oldDelegate.cellHeight != cellHeight;
+        oldDelegate.cellHeight != cellHeight ||
+        oldDelegate.isEditMode != isEditMode;
   }
 }
