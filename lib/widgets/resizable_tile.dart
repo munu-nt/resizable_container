@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui';
 import 'package:flutter/material.dart';
 
 enum ResizeHandle {
@@ -36,6 +37,7 @@ class ResizableTile extends StatefulWidget {
   final VoidCallback? onLongPress;
   final VoidCallback? onTap;
   final VoidCallback? onDoubleTap;
+  final VoidCallback? onToggleFavorite;
   const ResizableTile({
     super.key,
     required this.id,
@@ -63,6 +65,7 @@ class ResizableTile extends StatefulWidget {
     this.onLongPress,
     this.onTap,
     this.onDoubleTap,
+    this.onToggleFavorite,
   });
   final double? width;
   final double? height;
@@ -70,8 +73,42 @@ class ResizableTile extends StatefulWidget {
   State<ResizableTile> createState() => _ResizableTileState();
 }
 
-class _ResizableTileState extends State<ResizableTile> {
+class _ResizableTileState extends State<ResizableTile>
+    with SingleTickerProviderStateMixin {
   static const double handleSize = 32.0;
+  bool _isPressed = false;
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.15).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void didUpdateWidget(ResizableTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isEditing && !_pulseController.isAnimating) {
+      _pulseController.repeat(reverse: true);
+    } else if (!widget.isEditing && _pulseController.isAnimating) {
+      _pulseController.stop();
+      _pulseController.reset();
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final width = widget.width ?? (widget.gridWidth * widget.cellWidth);
@@ -109,65 +146,112 @@ class _ResizableTileState extends State<ResizableTile> {
 
   Widget _buildTileBody(double width, double height) {
     final isActive = widget.isDragging || widget.isResizing;
-    Widget body = AnimatedContainer(
-      duration: const Duration(milliseconds: 150),
-      transform: Matrix4.diagonal3Values(isActive ? 1.05 : 1.0, isActive ? 1.05 : 1.0, 1.0),
-      transformAlignment: Alignment.center,
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [widget.color, widget.color],
-        ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isActive
-              ? Colors.deepPurple.withValues(alpha: 0.5)
-              : Colors.grey.withValues(alpha: 0.2),
-          width: isActive ? 2.5 : 1.0,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isActive ? 0.15 : 0.05),
-            blurRadius: isActive ? 16 : 8,
-            offset: const Offset(0, 4),
+    final scale = _isPressed ? 0.95 : (isActive ? 1.05 : 1.0);
+
+    // Enhanced shadow on drag (enhancement #14)
+    final shadowBlur = widget.isDragging ? 28.0 : (isActive ? 20.0 : 12.0);
+    final shadowOffset = widget.isDragging ? 8.0 : 4.0;
+    final shadowOpacity = widget.isDragging ? 0.3 : (isActive ? 0.2 : 0.08);
+
+    // Generate gradient colors from base color
+    final gradientColors = [
+      widget.color,
+      HSLColor.fromColor(widget.color)
+          .withLightness(
+              (HSLColor.fromColor(widget.color).lightness * 0.85).clamp(0.0, 1.0))
+          .toColor(),
+    ];
+
+    Widget body = AnimatedScale(
+      scale: scale,
+      duration: const Duration(milliseconds: 120),
+      curve: Curves.easeOutCubic,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isActive
+                ? Colors.deepPurple.withValues(alpha: 0.5)
+                : Colors.white.withValues(alpha: 0.3),
+            width: isActive ? 2.5 : 1.5,
           ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: Stack(
-          children: [
-            _buildTileContent(),
-            if (widget.isEditing)
-              Positioned(
-                top: 8,
-                left: 8,
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.8),
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.1),
-                        blurRadius: 4,
-                      ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.favorite_border,
-                    color: Colors.black54,
-                    size: 14,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: shadowOpacity),
+              blurRadius: shadowBlur,
+              offset: Offset(0, shadowOffset),
+              spreadRadius: widget.isDragging ? 2 : 0,
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: Stack(
+            children: [
+              // Gradient background
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: gradientColors,
                   ),
                 ),
               ),
-          ],
+              // Glassmorphism overlay
+              BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 0.5, sigmaY: 0.5),
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        Colors.white.withValues(alpha: 0.15),
+                        Colors.white.withValues(alpha: 0.05),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              // Tile content
+              _buildTileContent(),
+              if (widget.isEditing)
+                Positioned(
+                  top: 8,
+                  left: 8,
+                  child: GestureDetector(
+                    onTap: widget.onToggleFavorite,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.8),
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.1),
+                            blurRadius: 4,
+                          ),
+                        ],
+                      ),
+                      child: Icon(
+                        widget.isFavorite ? Icons.favorite : Icons.favorite_border,
+                        color: widget.isFavorite ? Colors.red : Colors.black54,
+                        size: 14,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
+
+
     if (widget.isEditing) {
       return GestureDetector(
         onPanUpdate: (details) => widget.onDrag(details.delta),
@@ -176,11 +260,26 @@ class _ResizableTileState extends State<ResizableTile> {
         child: body,
       );
     } else {
+      // Ripple effect with scale on press
       return GestureDetector(
+        onTapDown: (_) => setState(() => _isPressed = true),
+        onTapUp: (_) => setState(() => _isPressed = false),
+        onTapCancel: () => setState(() => _isPressed = false),
         onLongPress: widget.onLongPress,
         onTap: widget.onTap,
         onDoubleTap: widget.onDoubleTap,
-        child: body,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            splashColor: Colors.white.withValues(alpha: 0.2),
+            highlightColor: Colors.white.withValues(alpha: 0.1),
+            onTap: widget.onTap,
+            onLongPress: widget.onLongPress,
+            onDoubleTap: widget.onDoubleTap,
+            child: body,
+          ),
+        ),
       );
     }
   }
@@ -278,6 +377,7 @@ class _ResizableTileState extends State<ResizableTile> {
   }
 
   Widget _buildResizeHandle() {
+    // Pulsing resize handle (enhancement #19)
     return Positioned(
       right: 4,
       bottom: 4,
@@ -291,24 +391,27 @@ class _ResizableTileState extends State<ResizableTile> {
           height: handleSize + 12,
           alignment: Alignment.center,
           color: Colors.transparent,
-          child: Container(
-            width: 28,
-            height: 28,
-            decoration: BoxDecoration(
-              color: Colors.grey.shade200,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.3),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Icon(
-              Icons.open_in_full,
-              size: 16,
-              color: Colors.grey.shade800,
+          child: ScaleTransition(
+            scale: _pulseAnimation,
+            child: Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade200,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.3),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Icon(
+                Icons.open_in_full,
+                size: 16,
+                color: Colors.grey.shade800,
+              ),
             ),
           ),
         ),
