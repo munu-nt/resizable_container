@@ -17,7 +17,9 @@ void main() {
     // Verify that our app bar title is present.
     expect(find.text('Resizable Tiles'), findsOneWidget);
 
-    // Since tile loading is async, we can wait for it to settle
-    await tester.pumpAndSettle();
+    // Pump a few frames to let animations progress without waiting for them to complete
+    // (pumpAndSettle times out on continuous animations like entry animations)
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 500));
   });
 }

@@ -24,6 +24,7 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
   double? _currentPixelHeight;
   late AnimationController _shakeController;
   late AnimationController _settleController;
+  late AnimationController _entryController;
   Animation<Offset>? _settleAnim;
   Offset _settleFrom = Offset.zero;
   Offset _settleTo = Offset.zero;
@@ -31,6 +32,11 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
   double _currentPadding = 16.0;
   static const double _edgeResistance = 0.35;
   static const double _snapThreshold = 0.35;
+  static const double _dragThreshold = 8.0; // Min pixels to start drag
+  static const int _maxReflowIterations = 100; // Safety limit for reflow
+  bool _hasAnimatedEntry = false;
+  bool _isDragStarted = false;
+
   @override
   void initState() {
     super.initState();
@@ -42,12 +48,17 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
       vsync: this,
       duration: const Duration(milliseconds: 320),
     );
+    _entryController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
   }
 
   @override
   void dispose() {
     _shakeController.dispose();
     _settleController.dispose();
+    _entryController.dispose();
     super.dispose();
   }
 
@@ -145,24 +156,50 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
   ) {
     final gridState = context.read<GridStateProvider>();
     if (!gridState.isEditMode) return;
+
     setState(() {
-      if (gridState.draggingTileId != tile.id) {
+      // Accumulate drag offset
+      _dragOffset += delta;
+
+      // Check drag threshold before starting
+      if (!_isDragStarted) {
+        if (_dragOffset.distance < _dragThreshold) {
+          return; // Don't start drag until threshold exceeded
+        }
+        _isDragStarted = true;
         HapticFeedback.selectionClick();
         gridState.startDrag(tile.id);
       }
-      _dragOffset += delta;
+
+      // Calculate dynamic maxY based on current content
+      final tiles = context.read<TileProvider>().displayedTiles;
+      int maxGridY = 0;
+      for (var t in tiles) {
+        maxGridY = math.max(maxGridY, t.gridY + t.gridHeight);
+      }
+      final dynamicMaxY = (maxGridY + 5) * cellHeight; // Allow 5 rows beyond content
+
+      // Calculate bounds with proper edge handling
       final maxX = (_currentColumns - tile.gridWidth) * cellWidth;
-      final maxY = 10000.0;
       final rawX = tile.gridX * cellWidth + _dragOffset.dx;
       final rawY = tile.gridY * cellHeight + _dragOffset.dy;
+
+      // Apply resistance at edges with smoother curve
       final resistX = _applyResistance(rawX, 0, maxX);
-      final resistY = _applyResistance(rawY, 0, maxY);
+      final resistY = _applyResistance(rawY, 0, dynamicMaxY);
+
+      // Calculate target grid position from center of tile
       final centerX = resistX + (tile.gridWidth * cellWidth) / 2;
       final centerY = resistY + (tile.gridHeight * cellHeight) / 2;
+
       int targetGridX = _snap(centerX, cellWidth);
       int targetGridY = _snap(centerY, cellHeight);
+
+      // Clamp to valid grid bounds (improved edge handling)
       targetGridX = targetGridX.clamp(0, _currentColumns - tile.gridWidth);
       targetGridY = math.max(0, targetGridY);
+
+      // Try to reflow tiles around the new position
       var resolvedPositions = _reflowAround(
         tile.id,
         targetGridX,
@@ -170,6 +207,7 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
         tile.gridWidth,
         tile.gridHeight,
       );
+
       if (resolvedPositions != null) {
         gridState.updatePreview(
           targetGridX,
@@ -253,7 +291,19 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
     List<TileData> tiles,
     GridStateProvider gridState,
   ) {
-    return tiles.map((tile) {
+    // Trigger entry animation once when tiles are first loaded
+    if (!_hasAnimatedEntry && tiles.isNotEmpty) {
+      _hasAnimatedEntry = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _entryController.forward();
+        }
+      });
+    }
+
+    final tileWidgets = <Widget>[];
+    for (int index = 0; index < tiles.length; index++) {
+      final tile = tiles[index];
       final isDragging = tile.id == gridState.draggingTileId;
       final isResizing = tile.id == gridState.resizingTileId;
       int currentGridX = tile.gridX;
@@ -284,51 +334,118 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
           top = resistY;
         }
       }
-      return AnimatedPositioned(
-        duration:
-            isDragging ||
-                isResizing ||
-                (_settleController.isAnimating && isDragging)
-            ? Duration.zero
-            : const Duration(milliseconds: 200),
-        curve: Curves.easeOutCubic,
-        left: left,
-        top: top,
-        child: ResizableTile(
-          id: tile.id,
-          title: tile.title,
-          icon: tile.icon,
-          imageUrl: tile.imageUrl,
-          isFavorite: tile.isFavorite,
-          color: tile.color,
-          cellWidth: cellWidth,
-          cellHeight: cellHeight,
-          gridX: currentGridX,
-          gridY: currentGridY,
-          gridWidth: isResizing ? gridState.previewWidth : tile.gridWidth,
-          gridHeight: isResizing ? gridState.previewHeight : tile.gridHeight,
-          width: isResizing ? _currentPixelWidth : null,
-          height: isResizing ? _currentPixelHeight : null,
-          isDragging: isDragging,
-          isResizing: isResizing,
-          onDrag: (delta) => _handleDrag(tile, delta, cellWidth, cellHeight),
-          onDragEnd: () => _handleDragEnd(tile, cellWidth, cellHeight),
-          onResize: (handle, delta) =>
-              _handleResize(tile, handle, delta, cellWidth, cellHeight),
-          onResizeEnd: (handle) => _handleResizeEnd(tile),
-          isEditing: gridState.isEditMode,
-          shakeAnimation: _shakeController,
-          onLongPress: _enterEditMode,
-          onTap: () {
-            if (!gridState.isEditMode && widget.onTileTap != null) {
-              widget.onTileTap!(tile);
-            }
-          },
-          onDoubleTap: () => _handleDoubleTap(tile),
+
+      // Staggered entry animation: each tile starts slightly later
+      final staggerDelay = index * 0.08;
+      final entryAnimation = CurvedAnimation(
+        parent: _entryController,
+        curve: Interval(
+          staggerDelay.clamp(0.0, 0.7),
+          (staggerDelay + 0.3).clamp(0.0, 1.0),
+          curve: Curves.easeOutCubic,
         ),
       );
-    }).toList();
+
+      // Build tile widget
+      Widget tileWidget = ResizableTile(
+        id: tile.id,
+        title: tile.title,
+        icon: tile.icon,
+        imageUrl: tile.imageUrl,
+        isFavorite: tile.isFavorite,
+        color: tile.color,
+        cellWidth: cellWidth,
+        cellHeight: cellHeight,
+        gridX: currentGridX,
+        gridY: currentGridY,
+        gridWidth: isResizing ? gridState.previewWidth : tile.gridWidth,
+        gridHeight: isResizing ? gridState.previewHeight : tile.gridHeight,
+        width: isResizing ? _currentPixelWidth : null,
+        height: isResizing ? _currentPixelHeight : null,
+        isDragging: isDragging,
+        isResizing: isResizing,
+        onDrag: (delta) => _handleDrag(tile, delta, cellWidth, cellHeight),
+        onDragEnd: () => _handleDragEnd(tile, cellWidth, cellHeight),
+        onResize: (handle, delta) =>
+            _handleResize(tile, handle, delta, cellWidth, cellHeight),
+        onResizeEnd: (handle) => _handleResizeEnd(tile),
+        isEditing: gridState.isEditMode,
+        shakeAnimation: _shakeController,
+        onLongPress: _enterEditMode,
+        onTap: () {
+          if (!gridState.isEditMode && widget.onTileTap != null) {
+            widget.onTileTap!(tile);
+          }
+        },
+        onDoubleTap: () => _handleDoubleTap(tile),
+        onToggleFavorite: () {
+          HapticFeedback.lightImpact();
+          context.read<TileProvider>().toggleFavorite(tile.id);
+        },
+      );
+
+      // Wrap with swipe-to-favorite in non-edit mode (#17)
+      if (!gridState.isEditMode) {
+        tileWidget = Dismissible(
+          key: Key('swipe_${tile.id}'),
+          direction: DismissDirection.horizontal,
+          confirmDismiss: (direction) async {
+            HapticFeedback.mediumImpact();
+            context.read<TileProvider>().toggleFavorite(tile.id);
+            return false; // Don't actually dismiss
+          },
+          background: Container(
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.only(left: 20),
+            child: Icon(
+              tile.isFavorite ? Icons.star_border : Icons.star,
+              color: Colors.amber,
+              size: 32,
+            ),
+          ),
+          secondaryBackground: Container(
+            alignment: Alignment.centerRight,
+            padding: const EdgeInsets.only(right: 20),
+            child: Icon(
+              tile.isFavorite ? Icons.star_border : Icons.star,
+              color: Colors.amber,
+              size: 32,
+            ),
+          ),
+          child: tileWidget,
+        );
+      }
+
+      tileWidgets.add(
+        AnimatedPositioned(
+          duration:
+              isDragging ||
+                  isResizing ||
+                  (_settleController.isAnimating && isDragging)
+              ? Duration.zero
+              : const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          left: left,
+          top: top,
+          child: AnimatedBuilder(
+            animation: entryAnimation,
+            builder: (context, child) {
+              return Opacity(
+                opacity: entryAnimation.value,
+                child: Transform.translate(
+                  offset: Offset(0, 20 * (1 - entryAnimation.value)),
+                  child: child,
+                ),
+              );
+            },
+            child: tileWidget,
+          ),
+        ),
+      );
+    }
+    return tileWidgets;
   }
+
 
   void _handleDoubleTap(TileData tile) {
     if (!context.read<GridStateProvider>().isEditMode) return;
@@ -479,6 +596,7 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
       gridState.endDrag();
       _dragOffset = Offset.zero;
       _settleAnim = null;
+      _isDragStarted = false;
     });
   }
 
@@ -510,7 +628,9 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
     for (var tile in otherTiles) {
       int y = 0;
       bool placed = false;
-      while (!placed) {
+      int iterations = 0; // Safety counter
+      while (!placed && iterations < _maxReflowIterations) {
+        iterations++;
         for (int x = 0; x < _currentColumns; x++) {
           if (x + tile.gridWidth > _currentColumns) continue;
           final candidateRect = Rect.fromLTWH(
@@ -535,6 +655,11 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
         }
         if (placed) break;
         y++;
+      }
+      // If we hit the safety limit, place at the next available row
+      if (!placed) {
+        newPositions[tile.id] = math.Point(0, y);
+        occupiedRects.add(Rect.fromLTWH(0, y.toDouble(), tile.gridWidth.toDouble(), tile.gridHeight.toDouble()));
       }
     }
     return newPositions;
