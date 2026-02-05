@@ -225,8 +225,8 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
                 gridState.previewHeight,
                 gridState.draggingTileId ?? gridState.resizingTileId,
               )
-              ? Colors.white.withOpacity(0.15)
-              : Colors.red.withOpacity(0.2),
+              ? Colors.white.withValues(alpha: 0.15)
+              : Colors.red.withValues(alpha: 0.2),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color:
@@ -237,8 +237,8 @@ class _TileGridState extends State<TileGrid> with TickerProviderStateMixin {
                   gridState.previewHeight,
                   gridState.draggingTileId ?? gridState.resizingTileId,
                 )
-                ? Colors.white.withOpacity(0.4)
-                : Colors.red.withOpacity(0.5),
+                ? Colors.white.withValues(alpha: 0.4)
+                : Colors.red.withValues(alpha: 0.5),
             width: 2,
             strokeAlign: BorderSide.strokeAlignInside,
           ),
@@ -720,7 +720,7 @@ class _TileBackgroundPainter extends CustomPainter {
     if (!isEditMode) return;
 
     final paint = Paint()
-      ..color = Colors.grey.withOpacity(0.3)
+      ..color = Colors.grey.withValues(alpha: 0.3)
       ..style = PaintingStyle.fill;
 
     const double dotSize = 4.0;

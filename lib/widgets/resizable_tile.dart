@@ -111,7 +111,7 @@ class _ResizableTileState extends State<ResizableTile> {
     final isActive = widget.isDragging || widget.isResizing;
     Widget body = AnimatedContainer(
       duration: const Duration(milliseconds: 150),
-      transform: Matrix4.identity()..scale(isActive ? 1.05 : 1.0),
+      transform: Matrix4.diagonal3Values(isActive ? 1.05 : 1.0, isActive ? 1.05 : 1.0, 1.0),
       transformAlignment: Alignment.center,
       width: width,
       height: height,
